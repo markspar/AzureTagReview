@@ -18,8 +18,14 @@
                     if lowercase tag value 
 
     PARAMETER AzSubscriptionIDs
-    The Azure subscription IDs to operate against. By default, it will use the Variable setting named "AutoStartStop Subscriptions"
+    The Azure subscription IDs to operate against. By default, it will use the Variable setting named "AutoTagReview Subscriptions"
 	Enter as a command-delimited list of IDs (e.g. aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb)
+    PARAMETER TagNames
+    AzureTagReview Names that should be policed
+    PARAMETER TagValues
+    AzureTagReview Values that should be policed
+    PARAMETER TZ
+    AzureTagReview TimeZone variable for reporting time in operation
     PARAMETER Simulate
     If $true, the runbook will not perform any power actions and will only simulate evaluating the tagged schedules. Use this
     to test your runbook to see what it will do when run normally (Simulate = $false).
@@ -42,6 +48,8 @@ param(
     [String] $TagNames = "Use Variable Value",
     [parameter(Mandatory = $false)]
     [String] $TagValues = "Use Variable Value",
+	[parameter(Mandatory = $false)]
+    [String] $tz = "Use Variable Value",
     [parameter(Mandatory = $false)]
     [bool]$Simulate = $false,
     [parameter(Mandatory = $false)]
@@ -63,12 +71,17 @@ try {
     if ($TagNames -eq "Use Variable Value") {
         $TagNames = Get-AutomationVariable -Name "AzureTagReview Tags" -ErrorAction Ignore
     }
+	#parse tagnames into array
     # Retrieve environment tag excludes from variable asset if not specified
     if ($TagValues -eq "Use Variable Value") {
         $TagValues = Get-AutomationVariable -Name "AzureTagReview Values" -ErrorAction Ignore
     }
+	#parse tagvalues into array
+    # Retrieve environment tag excludes from variable asset if not specified
+    if ($tz -eq "Use Variable Value") {
+        $tz = Get-AutomationVariable -Name "AzureTagReview TimeZone" -ErrorAction Ignore
+    }
     
-    $tz = "Eastern Standard Time"
     $startTime = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), $tz)
 
     Write-Output "Runbook started. Version: $VERSION"
@@ -76,8 +89,8 @@ try {
     Write-Output "Subscription IDs: [$AzSubscriptionIDs]"
 	Write-Output "Tag Names: $($TagNames)"
 	Write-Output "Tag Values: $($TagValues)"
-    if ($Simulate -eq $true) { Write-Output "*** Running in SIMULATE mode. No power actions will be taken. ***" }
-    else { Write-Output "*** Running in LIVE mode. Schedules will be enforced. ***" }
+    if ($Simulate -eq $true) { Write-Output "*** Running in SIMULATE mode. No tag changes will be made. ***" }
+    else { Write-Output "*** Running in LIVE mode. Tag names/values will be enforced. ***" }
 	if ($DebugLogs -eq $true) {	Write-Output "Debug level of logging enabled" }
 
 	$AzIDs = $AzSubscriptionIDs.Split(",")
@@ -90,19 +103,16 @@ try {
 		$CurrentSub = (Get-AzContext).Subscription.Id
 		If ($CurrentSub -ne $AzID) { Throw "Could not switch to SubscriptionID: $AzID" }
 
-		# Get a list of all virtual machines in subscription, excluding some environment tags
-		$vms = Get-AzVM -Status | Where-Object {(($_.tags.Autostartstop -notin @($null,'')) -and ($_.tags.Environment -notin $EnvironmentExclude))} | Sort-Object Name
-		# Get a list of all virtual machines in subscription, including only some environment tags
-		#$vms = Get-AzVM -Status | Where-Object {(($_.tags.Autostartstop -ne $null) -and ($_.tags.Environment -in $EnvironmentInclude))} | Sort-Object Name
+		# Get a list of all virtual machines in subscription
+		$vms = Get-AzVM -Status | Sort-Object Name
 
 		Write-Output " Processing [$($vms.Count)] virtual machines found in subscription"
 		foreach ($vm in $vms) {
 			Write-Output " Processing VM - $($vm.Name)"
-			$vmTags = $vm.tags
 			if ($DebugLogs -eq $true) {
-				Write-Output "  Environment - $($vm.tags.Environment)"
-#				Write-Output "  value - $($vmTags)"
+				Write-Output $vm.Tags
 			}
+
 		} #foreach vm
 		Write-Output " Finished processing subscription"
 	} # foreach azsubid
